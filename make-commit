@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <ref> <base-commit> <next> [description] -- sync reference with base commit
+    and commits the new version
+
+    where:
+        <ref> - target ref (e.g. \"altcos/x86_64/p10\")
+        <base-commit> - base commit (e.g. \"efa41..73\")
+        <next> - next version part increment (major|minor)
+        <description> - commit description"
+    echo "$usage"
+}
+
+STREAM_REF=$1
+BASE_COMMIT=$2
+NEXT_PART_INC=$3
+DESCRIPTION=$4
+
+if [[ -z "$STREAM_REF"
+    || -z "$BASE_COMMIT"
+    || -z "$NEXT_PART_INC"
+    || $# != 3 && $# != 4 ]]
+then
+    print_usage
+    exit 1
+fi
+
+check_version_part "$NEXT_PART_INC"
+
+export_stream_by_ref "$STREAM_REF"
+if [ ! -e "$MERGED_DIR" ]
+then
+    fatal "\"$MERGED_DIR\" not exists."
+    exit 1
+fi
+
+version="$(ref_info "$STREAM_REF" version -n "$NEXT_PART_INC" -v full)"
+version_path="$(ref_info "$STREAM_REF" version -n "$NEXT_PART_INC" -v path)"
+var_dir="$VARS_DIR"/"$version_path"
+
+cd "$WORK_DIR"
+sudo rm -f upper/etc root/etc
+
+sudo mkdir -p "$var_dir"
+
+cd upper
+sudo mkdir -p usr/share
+sudo rm -rf var/lib/apt var/cache/apt
+
+prepare_apt_dirs "$PWD"
+
+sudo rsync -av var "$var_dir"
+
+if [ -d lib ]
+then
+    sudo rsync -avd lib/rpm usr/share
+    if [[ ! -e "$MERGED_DIR"/usr/share/rpm ]]
+    then
+        sudo mkdir -p "$MERGED_DIR"/usr/share/rpm
+        sudo cp -r usr/share/rpm/* "$MERGED_DIR"/usr/share/rpm
+    fi
+fi
+
+sudo rm -rf run var
+sudo mkdir var
+
+to_delete=$(sudo find . -type c)
+cd "$WORK_DIR"/root
+sudo rm -rf "$to_delete"
+
+cd ../upper
+sudo find . -depth | (cd ../merged;sudo cpio -pmdu "$WORK_DIR"/root)
+
+cd ..
+sudo umount merged
+
+add_metadata=
+if ! is_base_ref "$STREAM_REF"
+then
+    add_metadata=" --add-metadata-string=parent_commit_id=$BASE_COMMIT"
+    add_metadata="$add_metadata --add-metadata-string=parent_version=$version"
+fi
+
+new_commit=$(
+    sudo ostree commit \
+        --repo="$OSTREE_BARE_DIR" \
+        --tree=dir="$BASE_COMMIT" \
+        -b "$STREAM_REF" \
+        -m "$DESCRIPTION" \
+        --no-bindings \
+        --mode-ro-executables \
+        "$add_metadata" \
+        --add-metadata-string=version="$version")
+
+cd "$VARS_DIR"
+sudo ln -sf "$version_path" "$new_commit"
+sudo rm -rf "$BASE_COMMIT"
+
+sudo ostree summary --repo="$OSTREE_BARE_DIR" --update
+
+sudo rm -rf "$WORK_DIR"
+
+echo "$new_commit"

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -eo pipefail
+SR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <ref> <images> - copy an image to altcos
+
+    where:
+        <ref> - target ref (e.g. \"altcos/x86_64/p10\")
+        <images> - list of images to copy"
+    echo "$usage"
+}
+
+MERGED_DIR=$1
+shift
+
+if [ ! -e "$MERGED_DIR" ]
+then
+    fatal "\"$MERGED_DIR\" not exists."
+    exit 1
+fi
+
+docker_images_dir=$MERGED_DIR/usr/dockerImages
+sudo mkdir -p $docker_images_dir
+
+for image
+do
+    echo "$image"
+    archive_file=$(echo $image | tr '/' '_' | tr ':' '_')
+    archive_file=$docker_images_dir/$archive_file
+    sudo rm -rf $archive_file || exit 1
+
+    xzfile="$archive_file.xz"
+    if [ ! -f $xzfile ]
+    then
+        sudo rm -f $archive_file || exit 1
+        sudo skopeo copy --additional-tag=$image docker://$image docker-archive:$archive_file || exit 1
+        sudo xz -9 $archive_file || exit 1
+    fi
+done

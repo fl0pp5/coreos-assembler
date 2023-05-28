@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+source "$SR"/functions.sh
+
+check_root_uid
+
+check_envs STREAMS_ROOT ALTCOS_BASE_URL
+
+print_usage() {
+    usage="$(basename "$0") <branch> <arch> <description> -- convert the rootfs to OSTree repository
+
+    where:
+        <branch> - target branch from list: $(get_allowed_branches)
+        <arch> - target architecture from list: $(get_allowed_architectures)
+        <description> - commit description"
+    echo "$usage"
+}
+
+BRANCH=$1
+ARCH=$2
+DESCRIPTION=$3
+
+if [[ -z "$BRANCH" || -z "$ARCH" || $# != 2 && $# != 3 ]]
+then
+    print_usage
+    exit 1
+fi
+
+export_stream "$BRANCH" "$ARCH"
+
+rootfs_archive="$ROOTFS_DIR"/acos-latest-"$ARCH".tar
+
+if [ ! -e "$rootfs_archive" ]
+then
+    fatal "\"$rootfs_archive\" must be exists."
+    exit 1
+fi
+
+if [ ! -e "$OSTREE_BARE_DIR" ]
+then
+    fatal "\"$OSTREE_BARE_DIR\" must be exists."
+    exit 1
+fi
+
+tmpdir="$(mktemp --tmpdir -d "$(basename "$0")"-XXXXXX)"
+root_tmpdir="$tmpdir"/root
+mkdir -p "$root_tmpdir"
+
+info "Extracting \"$rootfs_archive\" to \"$root_tmpdir\"..."
+tar xf "$rootfs_archive" -C "$root_tmpdir" \
+    --exclude=./dev/tty \
+    --exclude=./dev/tty0 \
+    --exclude=./dev/console \
+    --exclude=./dev/urandom \
+    --exclude=./dev/random \
+    --exclude=./dev/full \
+    --exclude=./dev/zero \
+    --exclude=./dev/pts/ptmx \
+    --exclude=./dev/null
+
+rm -f "root_tmpdir"/etc/resolv.conf
+ln -sf /run/systemd/resolve/resolv.conf "$root_tmpdir"/etc/resolv.conf
+
+NS=$(get_apt_repo_namespace "$BRANCH")
+
+sed -i "s/#rpm \[$NS\] http/rpm \[$NS\] http/" "$root_tmpdir"/etc/apt/sources.list.d/alt.list
+sed -i 's/^LABEL=ROOT\t/LABEL=boot\t/g' "$root_tmpdir"/etc/fstab
+sed -i 's/^AcceptEnv /#AcceptEnv /g' "$root_tmpdir"/etc/openssh/sshd_config
+sed -i 's/^# WHEEL_USERS ALL=(ALL) ALL$/WHEEL_USERS ALL=(ALL) ALL/g' "$root_tmpdir"/etc/sudoers
+echo "zincati ALL=NOPASSWD: ALL" > "$root_tmpdir"/etc/sudoers.d/zincati
+sed -i 's|^HOME=/home$|HOME=/var/home|g' "$root_tmpdir"/etc/default/useradd
+echo "blacklist floppy" > "$root_tmpdir"/etc/modprobe.d/blacklist-floppy.conf
+mkdir -m 0775 "$root_tmpdir"/sysroot
+ln -s sysroot/ostree "$root_tmpdir"/ostree
+
+for dn in home opt srv mnt; do
+    mv -f "$root_tmpdir"/"$dn" "$root_tmpdir"/var
+    ln -sf var/"$dn" "$root_tmpdir"/"$dn"
+done
+mv -f "$root_tmpdir"/root "$root_tmpdir/var/roothome"
+mv -f "$root_tmpdir"/usr/local "$root_tmpdir/var/usrlocal"
+ln -sf var/roothome "$root_tmpdir"/root
+ln -sf ../var/usrlocal "$root_tmpdir"/usr/local
+
+mkdir -p "$root_tmpdir"/etc/ostree/remotes.d
+
+echo "
+[remote \"altcos\"]
+url=http://$ALTCOS_BASE_URL/streams/$BRANCH/$ARCH/ostree/archive
+gpg-verify=false
+" > "$root_tmpdir"/etc/ostree/remotes.d/altcos.conf
+
+echo "
+# ALTLinux CoreOS Cincinnati backend
+[cincinnati]
+base_url=\"http://$ALTCOS_BASE_URL\"
+" > "$root_tmpdir"/etc/zincati/config.d/50-altcos-cincinnati.toml
+
+echo "
+[Match]
+Name=eth0
+
+[Network]
+DHCP=yes
+" > "$root_tmpdir"/etc/systemd/network/20-wired.network
+
+sed -i -e 's|#AuthorizedKeysFile\(.*\)|AuthorizedKeysFile\1 .ssh/authorized_keys.d/ignition|' \
+    "$root_tmpdir"/etc/openssh/sshd_config
+
+chroot "$root_tmpdir" groupadd altcos
+chroot "$root_tmpdir" useradd \
+    -g altcos \
+    -G docker,wheel \
+    -d /var/home/altcos \
+    --create-home \
+    -s /bin/bash altcos \
+    -p '$y$j9T$ZEYmKSGPiNFOZNTjvobEm1$IXLGt5TxdNC/OhJyzFK5NVM.mt6VvdtP6mhhzSmvE94' # password: 1
+
+
+split_passwd "$root_tmpdir"/etc/passwd "$root_tmpdir"/lib/passwd /tmp/passwd.$$
+mv /tmp/passwd.$$ "$root_tmpdir"/etc/passwd
+
+split_group "$root_tmpdir"/etc/group "$root_tmpdir"/lib/group /tmp/group.$$
+mv /tmp/group.$$ "$root_tmpdir"/etc/group
+
+sed \
+    -e 's/passwd:.*$/& altfiles/' \
+    -e 's/group.*$/& altfiles/' \
+    -i "$root_tmpdir"/etc/nsswitch.conf
+
+mv "$root_tmpdir"/var/lib/rpm "$root_tmpdir"/lib/rpm
+sed 's/\%{_var}\/lib\/rpm/\/lib\/rpm/' -i "$root_tmpdir"/usr/lib/rpm/macros
+
+
+kernel=$(find "$root_tmpdir"/boot -type f -name "vmlinuz-*")
+sha=$(sha256sum "$kernel" | awk '{print $1;}')
+mv "$kernel" "$kernel-$sha"
+
+rm -f \
+    "$root_tmpdir"/boot/vmlinuz \
+    "$root_tmpdir"/boot/initrd*
+
+cat <<EOF > "$root_tmpdir"/ostree.conf
+d /run/ostree 0755 root root -
+f /run/ostree/initramfs-mount-var 0755 root root -
+EOF
+
+chroot "$root_tmpdir" dracut \
+    -v \
+    --reproducible \
+    --gzip \
+    --no-hostonly \
+	-f /boot/initramfs-"$sha" \
+	--add ignition \
+	--add ostree \
+	--include /ostree.conf /etc/tmpfiles.d/ostree.conf \
+	--include /etc/systemd/network/eth0.network /etc/systemd/network/eth0.network \
+	--omit-drivers=floppy \
+	--omit=nfs \
+	--omit=lvm \
+	--omit=iscsi \
+	--kver "$(ls "$root_tmpdir"/lib/modules)"
+
+rm -rf "$root_tmpdir"/usr/etc
+mv "$root_tmpdir"/etc "$root_tmpdir"/usr/etc
+
+version="$(ref_info "$STREAM_REF" version -n major -v full)"
+version_path="$(ref_info "$STREAM_REF" version -n major -v path)"
+
+mkdir -p "$VARS_DIR"/"$version_path"
+
+rsync -av "$root_tmpdir"/var "$VARS_DIR"/"$version_path"
+
+rm -rf "${root_tmpdir:?}"/var
+mkdir "$root_tmpdir"/var
+
+commit_id=$(
+    ostree commit \
+        --repo="$OSTREE_BARE_DIR" \
+        --tree=dir="$root_tmpdir" \
+        -b "$STREAM_REF" \
+        -m "$DESCRIPTION" \
+        --no-xattrs \
+        --no-bindings \
+        --mode-ro-executables \
+        --add-metadata-string=version="$version")
+
+cd "$VARS_DIR"
+
+ln -sf "$version_path" "$commit_id"
+
+rm -rf "$tmpdir"
+
+echo "$commit_id"

@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import abc
+import argparse
+import dataclasses
+import logging
+import pathlib
+import shutil
+import subprocess
+import sys
+import typing
+
+import pydantic
+import yaml
+from gi.repository import GLib
+
+import cmdlib
+import altcos
+
+SR = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
+
+Package: typing.TypeAlias = str
+
+
+class Action(abc.ABC):
+    @abc.abstractmethod
+    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+        pass
+
+
+class Apt(pydantic.BaseModel, Action):
+    class _Body(pydantic.BaseModel):
+        update: bool = True
+        upgrade: bool = True
+        install: list[Package] = None
+        remove: list[Package] = None
+
+    apt: Apt._Body
+
+    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+        if self.apt.update:
+            cmdlib.aruncmd_with_print(f"./apt-ref "
+                                      f"{stream.like_ostree_ref()} "
+                                      f"update")
+
+        if self.apt.upgrade:
+            cmdlib.aruncmd_with_print(f"./apt-ref "
+                                      f"{stream.like_ostree_ref()} "
+                                      f"upgrade")
+
+        if self.apt.install:
+            cmdlib.aruncmd_with_print(f"./apt-ref "
+                                      f"{stream.like_ostree_ref()} "
+                                      f"install {' '.join(self.apt.install)}")
+
+        if self.apt.remove:
+            cmdlib.aruncmd_with_print(f"./apt-ref "
+                                      f"{stream.like_ostree_ref()} "
+                                      f"remove {' '.join(self.apt.remove)}")
+        return env
+
+
+class Env(pydantic.BaseModel, Action):
+    class _Cmd(pydantic.BaseModel):
+        cmd: str
+
+    env: dict[str, str | Env._Cmd]
+
+    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+        for k, v in self.env.items():
+            cmd = cmdlib.make_export_env_cmd(env)
+            if isinstance(v, Env._Cmd):
+                if env_cmd := v.cmd:
+                    cmd += f"sudo chroot {stream.merged_dir} sh -c \"{env_cmd}\""
+            else:
+                cmd += f"{k}=\"{v}\";echo ${k}"
+
+            env[k] = cmdlib.runcmd(cmd).stdout.decode().replace("\n", " ")
+        return env
+
+
+class Podman(pydantic.BaseModel, Action):
+    class _Body(pydantic.BaseModel):
+        env_list_images: str
+        images: list[str]
+
+    podman: Podman._Body
+
+    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+        images = self.podman.images
+        env_list_images = self.podman.env_list_images
+
+        if images:
+            images = " ".join(images)
+
+            if env_list_images:
+                for env_name in env_list_images.split(","):
+                    images += f" {env[env_name]}"
+
+            cmd = f"./skopeo-copy {stream.merged_dir} {images}"
+            cmdlib.aruncmd_with_print(f"{cmdlib.make_export_env_cmd(env)}{cmd}")
+        return env
+
+
+class Butane(pydantic.BaseModel, Action):
+    butane: dict
+
+    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+        butane_yml = yaml.safe_dump(self.butane)
+
+        cmd = f"echo \"{butane_yml}\" | ./apply-ignition {stream.like_ostree_ref()}"
+        cmdlib.runcmd(f"{cmdlib.make_export_env_cmd(env)}{cmd}")
+        return env
+
+
+class Run(pydantic.BaseModel, Action):
+    run: list[str]
+
+    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+        cmd = f"sudo chroot {stream.merged_dir} bash -c \"{''.join(self.run)}\""
+        cmdlib.runcmd(f"{cmdlib.make_export_env_cmd(env)}{cmd}")
+        return env
+
+
+class VersionPart(altcos.StrEnum):
+    MAJOR = "major"
+    MINOR = "minor"
+
+
+class Config(pydantic.BaseModel):
+    description: str
+    version_part: VersionPart = VersionPart.MAJOR
+    forward_root: str = None
+    update: bool = False
+    actions: list[Apt | Env | Podman | Butane | Run]
+
+
+@dataclasses.dataclass
+class BuildOptions:
+    stream: altcos.Stream
+    body: Config
+    skip_checkout: bool
+    skip_commit: bool
+    skip_forward: bool
+    skip_archive: bool
+
+
+def handle_build(opt: BuildOptions) -> None:
+    env = {}
+
+    if opt.stream.stream_dir.exists() and not opt.body.update:
+        if opt.stream.substream is None:
+            logging.fatal(f"Creating base stream not allowed via acosfile")
+        else:
+            logging.fatal(f"Stream \"{opt.stream.like_ostree_ref()}\" already exists.")
+        sys.exit(1)
+
+    if not opt.skip_forward and opt.body.forward_root:
+        forward_root = pathlib.Path(opt.body.forward_root)
+        cmdlib.fatal_if(not forward_root.is_dir(),
+                        f"Error while trying to read directory \"{opt.body.forward_root}\"")
+        shutil.copytree(forward_root,
+                        opt.stream.stream_dir.joinpath(forward_root.name))
+
+    src_stream = opt.stream \
+        if opt.body.update \
+        else opt.stream.base_stream()
+
+    if not opt.skip_checkout:
+        try:
+            cmdlib.runcmd(f"./checkout "
+                          f"{src_stream.like_ostree_ref()} "
+                          f"{opt.stream.like_ostree_ref()}", True)
+        except subprocess.SubprocessError:
+            logging.fatal(f"Checkout \"{src_stream.like_ostree_ref()}\" to "
+                          f"\"{opt.stream.like_ostree_ref()}\" failed (\"{src_stream.like_ostree_ref()}\" not exists).")
+            sys.exit(1)
+
+    for action in opt.body.actions:
+        try:
+            env = action.exec(opt.stream, env)
+        except Exception as e:
+            logging.fatal(f"Action \"{action}\" execution error :: \"{e}\"")
+            sys.exit(1)
+
+    if not opt.skip_commit:
+        try:
+            repo = altcos.Repository(src_stream).open()
+            commit = repo.last_commit()
+            cmdlib.aruncmd_with_print(f"./make-commit "
+                                      f"{opt.stream.like_ostree_ref()} "
+                                      f"{commit} "
+                                      f"{opt.body.version_part} "
+                                      f"\"{opt.body.description}\"")
+        except [GLib.Error, ValueError] as e:
+            logging.fatal(e)
+            sys.exit(1)
+
+        if not opt.skip_archive:
+            try:
+                commit = repo.last_commit()
+                cmdlib.aruncmd_with_print(f"./pull-archive "
+                                          f"{opt.stream.like_ostree_ref()} "
+                                          f"{commit}")
+            except GLib.Error as e:
+                logging.fatal(e)
+                sys.exit(1)
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+
+    parser = argparse.ArgumentParser(description="\"acosfile\" handler.")
+    parser.add_argument("config")
+    parser.add_argument("--skip-checkout",
+                        action="store_true",
+                        help="If true, skips the reference checkout.")
+    parser.add_argument("--skip-commit",
+                        action="store_true",
+                        help="If true, skips the reference commit.")
+    parser.add_argument("--skip-forward",
+                        action="store_true",
+                        help="If true, skips the directory forwarding.")
+    parser.add_argument("--skip-archive",
+                        action="store_true",
+                        help="If true, skips the OSTree-archiving")
+    args = parser.parse_args()
+
+    with open(args.config) as file:
+        content = yaml.safe_load(file)
+
+    opts = []
+    for ref in content:
+        stream = altcos.Stream.from_ostree_ref(SR, ref)
+        body = Config.parse_obj(content[stream.like_ostree_ref()])
+        opts.append(BuildOptions(stream,
+                                 body,
+                                 args.skip_checkout,
+                                 args.skip_commit,
+                                 args.skip_forward,
+                                 args.skip_archive))
+    [handle_build(opt) for opt in opts]
+
+
+if __name__ == '__main__':
+    main()

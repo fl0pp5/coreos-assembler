@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+import abc
+import argparse
+import logging
+import sys
+
+from gi.repository import GLib
+
+import altcos
+import cmdlib
+
+SR = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
+
+
+class BaseParserHandler(abc.ABC):
+    @staticmethod
+    @abc.abstractmethod
+    def handle(args: argparse.Namespace) -> None:
+        pass
+
+    @staticmethod
+    @abc.abstractmethod
+    def fill(parser: argparse.ArgumentParser) -> None:
+        pass
+
+
+class CommitParserHandler(BaseParserHandler):
+    @staticmethod
+    def handle(args: argparse.Namespace) -> None:
+        stream = cmdlib.stream_from_ref(SR, args.ref)
+        repository = cmdlib.wrap_err(altcos.Repository(stream, altcos.Repository.Mode(args.mode)).open,
+                                     f"Repository directory \"{stream.ostree_bare_dir}\" not exists.",
+                                     GLib.Error)
+
+        commit = cmdlib.wrap_err(repository.last_commit,
+                                 "No one commit not found.",
+                                 GLib.Error)
+        print(commit)
+
+    @staticmethod
+    def fill(parser: argparse.ArgumentParser) -> None:
+        parser.set_defaults(handle=CommitParserHandler.handle)
+
+
+class VersionParserHandler(BaseParserHandler):
+    @staticmethod
+    def handle(args: argparse.Namespace) -> None:
+        stream = cmdlib.stream_from_ref(SR, args.ref)
+        repository = cmdlib.wrap_err(altcos.Repository(stream, altcos.Repository.Mode(args.mode)).open,
+                                     f"Repository directory \"{stream.ostree_bare_dir}\" not exists.",
+                                     GLib.Error)
+        if args.commit:
+            version = cmdlib.wrap_err(altcos.Commit(repository, args.commit).version,
+                                      f"Commit with id \"{args.commit}\" not found.",
+                                      GLib.Error)
+        else:
+            try:
+                version = repository.last_commit().version()
+            except GLib.Error:
+                if args.next:
+                    print(VersionParserHandler.view_like(
+                        altcos.Version(0, 0, stream.branch, stream.substream), args.view))
+                    sys.exit(0)
+                logging.fatal("No one commit not found.")
+                sys.exit(1)
+
+        match args.next:
+            case "major":
+                version.major += 1
+            case "minor":
+                version.minor += 1
+
+        print(VersionParserHandler.view_like(version, args.view))
+
+    @staticmethod
+    def fill(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("-n", "--next",
+                            choices=["major", "minor"],
+                            help="Part of the version for increment.")
+        parser.add_argument("-c", "--commit",
+                            help="Commit hashsum.")
+        parser.add_argument("-v", "--view",
+                            choices=["path", "full", "native"],
+                            default="native",
+                            help="Version output mode.")
+
+        parser.set_defaults(handle=VersionParserHandler.handle)
+
+    @staticmethod
+    def view_like(version: altcos.Version, view: str) -> str:
+        match view:
+            case "path":
+                version = "/".join([version.date, str(version.major), str(version.minor)])
+            case "native":
+                version = str(version)
+            case "full":
+                version = version.full_version
+        return version
+
+
+class ReferenceParserHandler(BaseParserHandler):
+    @staticmethod
+    def handle(args: argparse.Namespace) -> None:
+        stream = cmdlib.stream_from_ref(SR, args.ref)
+
+        if args.is_base:
+            print(stream.substream is None)
+        else:
+            print(cmdlib.stream_to_export(stream))
+
+    @staticmethod
+    def fill(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("ref",
+                            help="Reference name (e.g. \"altcos/x86_64/p10\")")
+        parser.add_argument("-m", "--mode",
+                            choices=[*altcos.Repository.Mode],
+                            default=altcos.Repository.Mode.BARE.value,
+                            help="Basic repository mode.")
+        parser.add_argument("-b", "--is-base",
+                            action="store_true",
+                            help="If true, checks whether the branch is basic.")
+        parser.set_defaults(handle=ReferenceParserHandler.handle)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="A tool for working with reference.")
+    ReferenceParserHandler.fill(parser)
+    subparsers = parser.add_subparsers()
+
+    version = subparsers.add_parser("version")
+    commit = subparsers.add_parser("commit")
+
+    VersionParserHandler.fill(version)
+    CommitParserHandler.fill(commit)
+
+    args = parser.parse_args()
+    args.handle(args)
+
+
+if __name__ == '__main__':
+    main()

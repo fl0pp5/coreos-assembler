@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+SR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <ref> <action: (update|upgrade|install <pkgs>|remove <pkgs>)>
+    and commits the new version
+
+    where:
+        <ref> - target ref (e.g. \"altcos/x86_64/p10\")
+        <action> - apt-get analogue action
+        "
+    echo "$usage"
+}
+
+STREAM_REF=$1
+ACTION=$2
+
+if [[ -z "$STREAM_REF" || -z "$ACTION" ]]
+then
+    print_usage
+    exit 1
+fi
+
+APT_CMD=
+PKGS=
+case "$ACTION" in
+    update)
+        APT_CMD="update";;
+    upgrade)
+        APT_CMD="dist-upgrade";;
+    install)
+        APT_CMD="install"
+        shift 2
+        PKGS=$*;;
+    remove)
+        APT_CMD="remove"
+        shift 2
+        PKGS=$*;;
+    *)
+        fatal "Invalid apt action \"$ACTION\"."
+        exit 1
+esac
+
+export_stream_by_ref "$STREAM_REF"
+if [ ! -e "$MERGED_DIR" ]
+then
+    fatal "\"$MERGED_DIR\" not exists."
+    exit 1
+fi
+
+prepare_apt_dirs "$MERGED_DIR"
+
+# shellcheck disable=SC2086
+sudo chroot "$MERGED_DIR" apt-get "$APT_CMD" -y -o RPM::DBPath='lib/rpm' $PKGS

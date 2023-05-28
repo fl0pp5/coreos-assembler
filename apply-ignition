@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <ref> - apply the ignition file to reference
+
+    where:
+        <ref> - target ref (e.g. \"altcos/x86_64/p10\")
+        "
+    echo "$usage"
+}
+
+STREAM_REF=$1
+if [[ -z "$STREAM_REF" || $# != 1 ]]
+then
+    print_usage
+    exit 1
+fi
+
+export_stream_by_ref "$STREAM_REF"
+if [ ! -e "$MERGED_DIR" ]
+then
+    fatal "\"$MERGED_DIR\" not exists."
+    exit 1
+fi
+
+tmp_butane_file="/tmp/$$.btn"
+tmp_ignition_file="/tmp/$$.ign"
+sudo tee "$tmp_butane_file"
+sudo butane -p -d \
+    "$STREAM_DIR" \
+    "$tmp_butane_file" \
+| sudo tee "$tmp_ignition_file"
+
+sudo /usr/lib/dracut/modules.d/30ignition/ignition \
+    -platform file \
+    --stage files \
+    -config-cache "$tmp_ignition_file" \
+    -root "$MERGED_DIR"
+
+sudo chroot "$MERGED_DIR" \
+    systemctl preset-all --preset-mode=enable-only
+
+sudo rm -f \
+    "$tmp_butane_file" \
+    "$tmp_ignition_file"

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <branch> <arch> -- init stream directories
+
+    where:
+        <branch> - target branch from list: $(get_allowed_branches)
+        <arch> - target architecture from list: $(get_allowed_architectures)"
+    echo "$usage"
+}
+
+BRANCH=$1
+ARCH=$2
+
+if [[ -z "$BRANCH" || -z "$ARCH" || $# != 2 ]]
+then
+    print_usage
+    exit 1
+fi
+
+export_stream "$BRANCH" "$ARCH"
+
+if [ -e "$OSTREE_BARE_DIR" ]
+then
+    fatal "Stream \"$BRANCH/$ARCH\" already exists."
+    exit 1
+fi
+
+for dir in "$STREAM_DIR" "$ROOTFS_DIR" "$OSTREE_BARE_DIR" "$OSTREE_ARCHIVE_DIR" "$VARS_DIR"
+do
+    mkdir -p "$dir"
+    info "\"$dir\" directory created."
+done
+
+ostree init --repo="$OSTREE_BARE_DIR" --mode=bare
+info "Bare OSTree repository created."
+
+ostree init --repo="$OSTREE_ARCHIVE_DIR" --mode=archive
+info "Archive OSTree repository created."

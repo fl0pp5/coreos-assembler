@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <ref> <commit> -- creates archive version to spread
+    and commits the new version
+
+    where:
+        <ref> - target ref (e.g. \"altcos/x86_64/p10\")
+        <commit> - commit to pull (e.g. \"a241..b2\")"
+    echo "$usage"
+}
+
+STREAM_REF=$1
+COMMIT=$2
+
+if [[ -z "$STREAM_REF" || -z "$COMMIT" || $# != 2 ]]
+then
+    print_usage
+    exit 1
+fi
+
+export_stream_by_ref "$STREAM_REF"
+
+if [ ! -e "$OSTREE_ARCHIVE_DIR" ]
+then
+    fatal "OSTree bare repo not exists :: \"$OSTREE_BARE_DIR\""
+    exit 1
+fi
+
+# check commit exist
+version=$(ref_info "$STREAM_REF" version -c "$COMMIT" -v full)
+
+info "Archiving a reference \"$STREAM_REF\" of version \"$version\" ($COMMIT)."
+
+sudo ostree pull-local \
+    --depth=-1 \
+    "$OSTREE_BARE_DIR" \
+    "$STREAM_REF" \
+    "$COMMIT" \
+    --repo="$OSTREE_ARCHIVE_DIR"

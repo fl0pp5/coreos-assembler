@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT MKIMAGE_PROFILES_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <ref> <target-ref> -- checkout reference
+
+    where:
+        <ref> - base ref (e.g. \"altcos/x86_64/p10\")
+        <target-ref> - target ref (e.g. \"altcos/x86_64/P10/k8s\")"
+    echo "$usage"
+}
+
+STREAM_REF=$1
+TARGET_STREAM_REF=$2
+
+if [[ -z "$STREAM_REF" || -z "$TARGET_STREAM_REF" || $# != 2 ]]
+then
+    print_usage
+    exit 1
+fi
+
+export_stream_by_ref "$STREAM_REF"
+BASE_STREAM_BARE_DIR="$OSTREE_BARE_DIR"
+
+commit="$(ref_info "$STREAM_REF" commit)"
+commit_dir="$VARS_DIR"/"$commit"
+
+if [ ! -e "$commit_dir" ]
+then
+    fatal "\"$commit_dir\" must be exists."
+    exit 1
+fi
+
+export_stream_by_ref "$TARGET_STREAM_REF"
+
+sudo mkdir -p "$WORK_DIR"
+cd "$WORK_DIR"
+
+sudo ostree checkout --repo "$BASE_STREAM_BARE_DIR" "$commit"
+sudo ln -sf "$commit" root
+
+if [[ $(findmnt -M merged) ]]
+then
+    sudo umount merged
+fi
+
+for dirname in merged upper work
+do
+    sudo mkdir "$dirname"
+done
+
+sudo mount \
+    -t overlay overlay \
+    -o lowerdir="$commit",upperdir=upper,workdir=work \
+    merged && cd merged
+
+sudo ln -sf usr/etc etc
+sudo rsync -a "$commit_dir"/var .
+sudo mkdir -p \
+    run/lock \
+    run/systemd/resolve \
+    tmp/.private/root
+sudo cp /etc/resolv.conf run/systemd/resolve/resolv.conf
+
+info "Merged dir in work: \"$MERGED_DIR\""
+info "[!] DONE [!]"

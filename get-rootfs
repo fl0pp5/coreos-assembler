@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT MKIMAGE_PROFILES_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <branch> <arch> -- get rootfs image
+
+    where:
+        <branch> - target branch from list: $(get_allowed_branches)
+        <arch> - target architecture from list: $(get_allowed_architectures)"
+    echo "$usage"
+}
+
+BRANCH=$1
+ARCH=$2
+
+if [[ -z "$BRANCH" || -z "$ARCH" || $# != 2 ]]
+then
+    print_usage
+    exit 1
+fi
+
+export_stream "$BRANCH" "$ARCH"
+
+if [ ! -e "$ROOTFS_DIR" ]
+then
+    fatal "Directory \"$ROOTFS_DIR\" must exists."
+    exit 1
+fi
+
+PKG_REPO_BRANCH=$(get_apt_repo_branch "$BRANCH")
+NS=$(get_apt_repo_namespace "$BRANCH")
+APT_ARCH=$(get_apt_repo_arch "$ARCH")
+
+APT_DIR=$HOME/apt
+mkdir -p \
+    "$APT_DIR"/lists/partial \
+    "$APT_DIR"/cache/"$BRANCH"/archives/partial \
+    "$APT_DIR"/"$ARCH"/RPMS.dir
+
+cat <<EOF > "$APT_DIR"/apt.conf."$BRANCH"."$ARCH"
+Dir::Etc::SourceList $APT_DIR/sources.list.$BRANCH.$ARCH;
+Dir::Etc::SourceParts /var/empty;
+Dir::Etc::main "/dev/null";
+Dir::Etc::parts "/var/empty";
+APT::Architecture "$APT_ARCH";
+Dir::State::lists $APT_DIR/lists;
+Dir::Cache $APT_DIR/cache/$BRANCH;
+EOF
+
+cat <<EOF > "$APT_DIR"/sources.list."$BRANCH"."$ARCH"
+rpm [$NS] http://ftp.altlinux.org/pub/distributions ALTLinux/$PKG_REPO_BRANCH/$ARCH classic
+rpm [$NS] http://ftp.altlinux.org/pub/distributions ALTLinux/$PKG_REPO_BRANCH/noarch classic
+rpm-dir file:$APT_DIR $ARCH dir
+EOF
+
+cd "$MKIMAGE_PROFILES_ROOT"
+
+info "mkimage-profiles starts working..."
+make \
+    DEBUG=1 \
+    APTCONF="$APT_DIR"/apt.conf."$BRANCH"."$ARCH" \
+    BRANCH="$BRANCH" \
+    ARCH="$ARCH" \
+    IMAGEDIR="$ROOTFS_DIR" \
+    vm/acos.tar

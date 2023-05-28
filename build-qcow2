@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "$SR"/functions.sh
+
+check_root_uid
+
+check_envs STREAMS_ROOT BUILDS_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <ref> <commit> <mode> -- makes qcow2 image
+
+    where:
+        <ref> - base ref (e.g. \"altcos/x86_64/p10\")
+        <commit> - base commit (e.g. \"bc21a..e2\")
+        <mode> - source repository (archive or bare)"
+    echo "$usage"
+}
+
+STREAM_REF=$1
+COMMIT=$2
+MODE=$3
+
+if [[ -z "$STREAM_REF" || -z "$COMMIT" || -z "$MODE" || $# != 3 ]]; then
+    print_usage
+    exit 1
+fi
+
+export_stream_by_ref "$STREAM_REF"
+
+if [ ! -e "$STREAM_DIR" ]; then
+    fatal "Stream \"$STREAM\" not exists."
+    exit 1
+fi
+
+version="$(ref_info "$STREAM_REF" -m "$MODE" version -c "$COMMIT")"
+version_path="$(ref_info "$STREAM_REF" -m archive version -c "$COMMIT" -v path)"
+commit_dir="$VARS_DIR"/"$version_path"/var
+PLATFORM=qemu
+
+build_dir="$(init_platform_dir \
+            "$PLATFORM" \
+            "$STREAM_REF" \
+            "$BUILDS_ROOT" \
+            "$version")"/qcow2
+mkdir -p "$build_dir"
+
+ROOT_SIZE=5GB
+
+img_stream_prefix="$BRANCH"
+if ! is_base_ref "$STREAM_REF"; then
+    img_stream_prefix="$BRANCH"_"$SUBSTREAM"
+fi
+qcow2_file="$build_dir/$img_stream_prefix.$ARCH.$version.$PLATFORM.qcow2"
+
+mount_dir=$(mktemp --tmpdir -d "$(basename "$0")"-XXXXXX)
+raw_file=$(mktemp --tmpdir "$(basename "$0")"-XXXXXX.raw)
+
+mount_dir_repo="$mount_dir/ostree/repo"
+
+fallocate -l "$ROOT_SIZE" "$raw_file"
+
+loop_dev=$(losetup --show -f "$raw_file")
+loop_part="$loop_dev"p1
+
+dd if=/dev/zero of="$loop_dev" bs=1M count=3
+parted "$loop_dev" mktable msdos
+parted -a optimal "$loop_dev" mkpart primary ext4 2MIB 100%
+parted "$loop_dev" set 1 boot on
+mkfs.ext4 -L boot "$loop_part"
+
+mount "$loop_part" "$mount_dir"
+
+ostree admin \
+    init-fs \
+    --modern "$mount_dir"
+
+case "$MODE" in
+    bare)
+        OSTREE_DIR="$OSTREE_BARE_DIR";;
+    archive)
+        OSTREE_DIR="$OSTREE_ARCHIVE_DIR";;
+esac
+
+ostree pull-local \
+    --repo "$mount_dir_repo" \
+    "$OSTREE_DIR" \
+    "$COMMIT"
+
+grub-install \
+    --target=i386-pc \
+    --root-directory="$mount_dir" \
+    "$loop_dev"
+
+ln -s ../loader/grub.cfg "$mount_dir"/boot/grub/grub.cfg
+
+ostree config \
+    --repo "$mount_dir_repo" \
+    set sysroot.bootloader grub2
+
+ostree config \
+    --repo "$mount_dir_repo" \
+    set sysroot.readonly true
+
+ostree refs \
+    --repo "$mount_dir_repo" \
+    --create altcos:"$STREAM_REF" \
+    "$COMMIT"
+
+ostree admin \
+    os-init "$OSNAME" \
+    --sysroot "$mount_dir"
+
+OSTREE_BOOT_PARTITION="/boot" ostree admin deploy altcos:"$STREAM_REF" \
+    --sysroot "$mount_dir" \
+    --os "$OSNAME" \
+    --karg-append=ignition.platform.id=qemu \
+    --karg-append=\$ignition_firstboot \
+    --karg-append=net.ifnames=0 \
+    --karg-append=biosdevname=0 \
+    --karg-append=rw \
+    --karg-append=quiet \
+    --karg-append=root=UUID="$(blkid --match-tag UUID -o value "$loop_part")"
+
+rm -rf "$mount_dir"/ostree/deploy/"$OSNAME"/var
+rsync -av "$commit_dir" \
+          "$mount_dir"/ostree/deploy/"$OSNAME"
+
+touch "$mount_dir"/ostree/deploy/"$OSNAME"/var/.ostree-selabeled
+touch "$mount_dir"/boot/ignition.firstboot
+
+umount "$mount_dir"
+rm -rf "$mount_dir"
+losetup -d "$loop_dev"
+
+qemu-img convert -O qcow2 "$raw_file" "$qcow2_file"
+rm "$raw_file"
+
+echo "$qcow2_file"
