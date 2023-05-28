@@ -136,8 +136,19 @@ def handle(args: argparse.Namespace) -> None:
         "removed": [pkg.to_dict() for _, pkg in unique(b, a).items()],
         "updated": [diff.to_dict() for diff in get_update_diff(a, b)],
     }
+    
+    content = json.dumps(result_json, indent=args.indent)
 
-    print(json.dumps(result_json, indent=args.indent))
+    if args.add_to_version:
+        diff_file = pathlib.Path(stream.vars_dir,
+                                 str(commit_b),
+                                 f"bdbdiff.json")
+
+        with open(diff_file, "w+") as file:
+            file.write(content)
+
+    else:
+        print(content)
 
 
 def main() -> None:
@@ -149,6 +160,9 @@ def main() -> None:
     parser.add_argument("-cb", "--commit-b",
                         dest="commit_b", required=True)
     parser.add_argument("-i", "--indent", type=int)
+    parser.add_argument("--add-to-version",
+                        action="store_true",
+                        help="Adds the packages diff to builds directory.")
 
     parser.set_defaults(handle=handle)
 

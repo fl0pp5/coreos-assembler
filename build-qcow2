@@ -35,7 +35,7 @@ if [ ! -e "$STREAM_DIR" ]; then
 fi
 
 version="$(ref_info "$STREAM_REF" -m "$MODE" version -c "$COMMIT")"
-version_path="$(ref_info "$STREAM_REF" -m archive version -c "$COMMIT" -v path)"
+version_path="$(ref_info "$STREAM_REF" -m "$MODE" version -c "$COMMIT" -v path)"
 commit_dir="$VARS_DIR"/"$version_path"/var
 PLATFORM=qemu
 
