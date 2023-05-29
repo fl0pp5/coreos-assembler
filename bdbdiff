@@ -141,7 +141,7 @@ def handle(args: argparse.Namespace) -> None:
 
     if args.add_to_version:
         diff_file = pathlib.Path(stream.vars_dir,
-                                 str(commit_b),
+                                 commit_a.version().like_path,
                                  f"bdbdiff.json")
 
         with open(diff_file, "w+") as file:

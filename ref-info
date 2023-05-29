@@ -90,7 +90,7 @@ class VersionParserHandler(BaseParserHandler):
     def view_like(version: altcos.Version, view: str) -> str:
         match view:
             case "path":
-                version = "/".join([version.date, str(version.major), str(version.minor)])
+                version = str(version.like_path)
             case "native":
                 version = str(version)
             case "full":

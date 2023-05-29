@@ -224,6 +224,10 @@ class Version:
         """
         return f"{self.branch}_{self.substream or 'base'}.{self}"
 
+    @property
+    def like_path(self) -> pathlib.Path:
+        return pathlib.Path(self.date, str(self.major), str(self.minor))
+
     @classmethod
     def from_str(cls, version: str) -> Version:
         """

@@ -26,3 +26,5 @@ altcos/x86_64/p10:
 ```shell
 ./buildfile build.yml private_altcos.pem
 ```
+***
+[документация по написанию конфига](buildfile.md)
