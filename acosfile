@@ -39,25 +39,19 @@ class Apt(pydantic.BaseModel, Action):
     apt: Apt._Body
 
     def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+        cmd = str(cmdlib.SCRIPTS_ROOT.joinpath(f"apt-ref {stream.like_ostree_ref()}"))
         if self.apt.update:
-            cmdlib.aruncmd_with_print(f"./apt-ref "
-                                      f"{stream.like_ostree_ref()} "
-                                      f"update")
+            cmdlib.runcmd(f"{cmd} update")
 
         if self.apt.upgrade:
-            cmdlib.aruncmd_with_print(f"./apt-ref "
-                                      f"{stream.like_ostree_ref()} "
-                                      f"upgrade")
+            cmdlib.runcmd(f"{cmd} upgrade")
 
         if self.apt.install:
-            cmdlib.aruncmd_with_print(f"./apt-ref "
-                                      f"{stream.like_ostree_ref()} "
-                                      f"install {' '.join(self.apt.install)}")
+            cmdlib.runcmd(f"{cmd} install {' '.join(self.apt.install)}")
 
         if self.apt.remove:
-            cmdlib.aruncmd_with_print(f"./apt-ref "
-                                      f"{stream.like_ostree_ref()} "
-                                      f"remove {' '.join(self.apt.remove)}")
+            cmdlib.runcmd(f"{cmd} remove {' '.join(self.apt.remove)}")
+
         return env
 
 
@@ -98,8 +92,9 @@ class Podman(pydantic.BaseModel, Action):
                 for env_name in env_list_images.split(","):
                     images += f" {env[env_name]}"
 
-            cmd = f"./skopeo-copy {stream.merged_dir} {images}"
-            cmdlib.aruncmd_with_print(f"{cmdlib.make_export_env_cmd(env)}{cmd}")
+            script = cmdlib.SCRIPTS_ROOT.joinpath("skopeo-copy")
+            cmd = f"{script} {stream.merged_dir} {images}"
+            cmdlib.runcmd(f"{cmdlib.make_export_env_cmd(env)}{cmd}")
         return env
 
 
@@ -109,7 +104,8 @@ class Butane(pydantic.BaseModel, Action):
     def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
         butane_yml = yaml.safe_dump(self.butane)
 
-        cmd = f"echo \"{butane_yml}\" | ./apply-ignition {stream.like_ostree_ref()}"
+        script = cmdlib.SCRIPTS_ROOT.joinpath("apply-ignition")
+        cmd = f"echo \"{butane_yml}\" | {script} {stream.like_ostree_ref()}"
         cmdlib.runcmd(f"{cmdlib.make_export_env_cmd(env)}{cmd}")
         return env
 
@@ -169,7 +165,8 @@ def handle_build(opt: BuildOptions) -> None:
 
     if not opt.skip_checkout:
         try:
-            cmdlib.runcmd(f"./checkout "
+            script = cmdlib.SCRIPTS_ROOT.joinpath("checkout")
+            cmdlib.runcmd(f"{script} "
                           f"{src_stream.like_ostree_ref()} "
                           f"{opt.stream.like_ostree_ref()}", True)
         except subprocess.SubprocessError:
@@ -188,7 +185,8 @@ def handle_build(opt: BuildOptions) -> None:
         try:
             repo = altcos.Repository(src_stream).open()
             commit = repo.last_commit()
-            cmdlib.aruncmd_with_print(f"./make-commit "
+            script = cmdlib.SCRIPTS_ROOT.joinpath("make-commit")
+            cmdlib.aruncmd_with_print(f"{script} "
                                       f"{opt.stream.like_ostree_ref()} "
                                       f"{commit} "
                                       f"{opt.body.version_part} "
@@ -200,7 +198,8 @@ def handle_build(opt: BuildOptions) -> None:
         if not opt.skip_archive:
             try:
                 commit = repo.last_commit()
-                cmdlib.aruncmd_with_print(f"./pull-archive "
+                script = cmdlib.SCRIPTS_ROOT.joinpath("pull-archive")
+                cmdlib.aruncmd_with_print(f"{script} "
                                           f"{opt.stream.like_ostree_ref()} "
                                           f"{commit}")
             except GLib.Error as e:

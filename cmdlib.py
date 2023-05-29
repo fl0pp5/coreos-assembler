@@ -1,5 +1,6 @@
 import logging
 import os
+import pathlib
 import subprocess
 import sys
 import typing
@@ -8,6 +9,7 @@ import altcos
 
 STREAMS_ROOT_ENV = "STREAMS_ROOT"
 BUILDS_ROOT_ENV = "BUILDS_ROOT"
+SCRIPTS_ROOT = pathlib.Path(__file__).absolute().parent
 
 
 def import_env(env: str) -> str:

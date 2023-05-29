@@ -16,8 +16,12 @@ SR = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
 BR = cmdlib.import_env(cmdlib.BUILDS_ROOT_ENV)
 
 
-def get_build_script_name(fmt: altcos.Format) -> str:
-    return f"build-{fmt}"
+def get_build_script(fmt: altcos.Format) -> pathlib.Path:
+    """
+    :param fmt:
+    :return: Абсолютный путь до скрипта.
+    """
+    return cmdlib.SCRIPTS_ROOT.joinpath(f"build-{fmt}")
 
 
 def get_path_to_image(stream: altcos.Stream,
@@ -71,11 +75,11 @@ def handle_build(opt: BuildOptions) -> None:
     for platform in opt.config.build:
         for fmt in opt.config.build[platform]:
             opts = opt.config.build[platform][fmt]
-            script = get_build_script_name(fmt)
-            cmdlib.aruncmd_with_print(f"sudo -E ./{script} "
-                                      f"{opt.stream.like_ostree_ref()} "
-                                      f"{commit} "
-                                      f"{opt.config.repo}")
+            script = get_build_script(fmt)
+            cmdlib.runcmd(f"sudo -E {script} "
+                          f"{opt.stream.like_ostree_ref()} "
+                          f"{commit} "
+                          f"{opt.config.repo}")
 
             if opts is None:
                 continue
