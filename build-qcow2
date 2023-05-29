@@ -48,10 +48,7 @@ mkdir -p "$build_dir"
 
 ROOT_SIZE=5GB
 
-img_stream_prefix="$BRANCH"
-if ! is_base_ref "$STREAM_REF"; then
-    img_stream_prefix="$BRANCH"_"$SUBSTREAM"
-fi
+img_stream_prefix="$(get_img_stream_prefix "$STREAM_REF")"
 qcow2_file="$build_dir/$img_stream_prefix.$ARCH.$version.$PLATFORM.qcow2"
 
 mount_dir=$(mktemp --tmpdir -d "$(basename "$0")"-XXXXXX)
@@ -76,13 +73,7 @@ ostree admin \
     init-fs \
     --modern "$mount_dir"
 
-case "$MODE" in
-    bare)
-        OSTREE_DIR="$OSTREE_BARE_DIR";;
-    archive)
-        OSTREE_DIR="$OSTREE_ARCHIVE_DIR";;
-esac
-
+OSTREE_DIR="$(get_ostree_dir "$STREAM_REF" "$MODE")"
 ostree pull-local \
     --repo "$mount_dir_repo" \
     "$OSTREE_DIR" \

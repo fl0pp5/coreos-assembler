@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+SR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "$SR"/functions.sh
+
+check_envs STREAMS_ROOT BUILDS_ROOT
+
+print_usage() {
+    usage="$(basename "$0") <ref> <commit> <mode> -- makes iso image
+
+    where:
+        <ref> - base ref (e.g. \"altcos/x86_64/p10\")
+        <commit> - base commit (e.g. \"bc21a..e2\")
+        <mode> - source repository (archive or bare)"
+    echo "$usage"
+}
+
+STREAM_REF=$1
+COMMIT=$2
+MODE=$3
+
+if [[ -z "$STREAM_REF" || -z "$COMMIT" || -z "$MODE" || $# != 3 ]]; then
+    print_usage
+    exit 1
+fi
+
+export_stream_by_ref "$STREAM_REF"
+
+if [ ! -e "$STREAM_DIR" ]; then
+    fatal "Stream \"$STREAM\" not exists."
+    exit 1
+fi
+
+version="$(ref_info "$STREAM_REF" -m "$MODE" version -c "$COMMIT")"
+version_path="$(ref_info "$STREAM_REF" -m "$MODE" version -c "$COMMIT" -v path)"
+commit_dir="$VARS_DIR"/"$version_path"/var
+PLATFORM=metal
+APT_DIR="$HOME"/apt
+
+build_dir="$(init_platform_dir \
+            "$PLATFORM" \
+            "$STREAM_REF" \
+            "$BUILDS_ROOT" \
+            "$version")"/iso
+sudo mkdir -p "$build_dir"
+
+img_stream_prefix="$(get_img_stream_prefix "$STREAM_REF")"
+iso_file="$build_dir/$img_stream_prefix.$ARCH.$version.$PLATFORM.iso"
+
+RPMBUILD_DIR="$(mktemp --tmpdir -d "$(basename "$0")"_rpmbuild-XXXXXX)"
+mkdir "$RPMBUILD_DIR"/SOURCES
+
+sudo tar -cf - \
+    -C "$(dirname "$commit_dir")" var \
+    | xz -9 -c - > "$RPMBUILD_DIR"/SOURCES/var.tar.xz
+
+mkdir "$RPMBUILD_DIR"/altcos_root
+
+ostree admin init-fs \
+    --modern "$RPMBUILD_DIR"/altcos_root
+
+OSTREE_DIR="$(get_ostree_dir "$STREAM_REF" "$MODE")"
+sudo ostree \
+    pull-local \
+    --repo "$RPMBUILD_DIR"/altcos_root/ostree/repo \
+    "$OSTREE_DIR" \
+    "$STREAM_REF"
+
+sudo tar -cf - -C "$RPMBUILD_DIR"/altcos_root . \
+    | xz -9 -c -T0 - > "$RPMBUILD_DIR"/SOURCES/altcos_root.tar.xz
+sudo rm -rf "$RPMBUILD_DIR"/altcos_root
+
+rpmbuild \
+    --define "_topdir $RPMBUILD_DIR" \
+    --define "_rpmdir $APT_DIR/$ARCH/RPMS.dir/" \
+    --define "_rpmfilename altcos-archives-0.1-alt1.x86_64.rpm" \
+    -bb specs/altcos-archives.spec
+
+sudo rm -rf "$RPMBUILD_DIR"
+
+sudo chmod a+w "$build_dir"
+
+make \
+    -C "$MKIMAGE_PROFILES_ROOT" \
+    APTCONF="$APT_DIR"/apt.conf."$BRANCH"."$ARCH" \
+    BRANCH="$BRANCH" \
+    IMAGEDIR="$build_dir" \
+    installer-altcos.iso
+
+mv "$(realpath "$build_dir"/installer-altcos-latest-x86_64.iso)" "$iso_file"
+
+find "$build_dir" -type l -delete
+
+echo "$iso_file"

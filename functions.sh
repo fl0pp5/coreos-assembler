@@ -13,6 +13,13 @@ check_root_uid() {
     }
 }
 
+check_no_root_uid() {
+    [ $UID -ne 0 ] || {
+        fatal "$(basename "$0") need to be run as non-root (uid!=0) only"
+        exit 1
+    }
+}
+
 fatal() {
     if test -t 1; then
         echo "${RED}fatal:${RESET} $*" 1>&2
@@ -237,4 +244,33 @@ get_allowed_architectures() {
 
 get_allowed_branches() {
     echo "$(python3 -c "from altcos import *; print(*Branch)")"
+}
+
+get_img_stream_prefix() {
+    local stream_ref=$1
+    (
+        export_stream_by_ref "$stream_ref"
+
+        img_stream_prefix="$BRANCH"
+        if ! is_base_ref "$STREAM_REF"; then
+            img_stream_prefix="$BRANCH"_"$SUBSTREAM"
+        fi
+
+        echo "$img_stream_prefix"
+    )
+}
+
+get_ostree_dir() {
+    local stream_ref=$1
+    local mode=$2
+    (
+        export_stream_by_ref "$stream_ref"
+        case "$mode" in
+        bare)
+            ostree_dir="$OSTREE_BARE_DIR";;
+        archive)
+            ostree_dir="$OSTREE_ARCHIVE_DIR";;
+        esac
+        echo "$ostree_dir"
+    )
 }
