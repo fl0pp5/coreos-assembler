@@ -42,3 +42,5 @@ pip install -r requirements.txt
 [Создание подпотоков](docs/create_substream.md)
 
 [Создание архивов](docs/create_archive.md)
+
+[Распространение](docs/spread.md)
