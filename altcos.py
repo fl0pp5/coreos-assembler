@@ -197,6 +197,18 @@ class Repository:
         hashsum = self.storage.resolve_rev(self.stream.like_ostree_ref(), False)[1]
         return Commit(self, hashsum)
 
+    def commit_by_version(self, version: Version, commit: Commit = None) -> Commit | None:
+        if commit is None:
+            commit = self.last_commit()
+
+        if commit.version().full_version == version.full_version:
+            return commit
+
+        if (parent := commit.parent()) is None:
+            return None
+
+        return self.commit_by_version(version, parent)
+
 
 class Version:
     def __init__(self,
