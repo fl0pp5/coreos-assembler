@@ -262,6 +262,9 @@ class Commit:
         content = self.repo.storage.load_commit(self.hashsum)
         return Version.from_str(content[1][0]["version"])
 
+    def description(self) -> str:
+        return self.repo.storage.load_commit(self.hashsum)[1][4]
+
     def parent(self) -> Commit | None:
         content = self.repo.storage.load_commit(self.hashsum)
         parent_hashsum = OSTree.commit_get_parent(content[1])
