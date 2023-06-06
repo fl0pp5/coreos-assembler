@@ -76,7 +76,10 @@ cd "$WORK_DIR"/root
 sudo rm -rf "$to_delete"
 
 cd ../upper
+
+set +eo pipefail
 sudo find . -depth | (cd ../merged;sudo cpio -pmdu "$WORK_DIR"/root)
+set -eo pipefail
 
 cd ..
 sudo umount merged
