@@ -232,7 +232,7 @@ def main() -> None:
     parser.add_argument("--skip-archive",
                         action="store_true",
                         help="If true, skips the OSTree-archiving.")
-    parser.add_argument("--skip-refsumrefsum",
+    parser.add_argument("--skip-refsum",
                         action="store_true",
                         help="If true, skips the metadata collection.")
     args = parser.parse_args()
