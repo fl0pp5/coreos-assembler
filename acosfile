@@ -209,7 +209,7 @@ def handle_build(opt: BuildOptions) -> None:
 
         if not opt.skip_refsum:
             commit = repo.last_commit()
-            script = cmdlib.SCRIPTS_ROOT.joinpath("refsumrefsum")
+            script = cmdlib.SCRIPTS_ROOT.joinpath("refsum")
             cmdlib.runcmd(f"sudo -E {script} "
                           f"{opt.stream.like_ostree_ref()} "
                           f"{commit} -w")
