@@ -140,7 +140,7 @@ class BuildOptions:
     skip_commit: bool
     skip_forward: bool
     skip_archive: bool
-    skip_repomd: bool
+    skip_refsum: bool
 
 
 def handle_build(opt: BuildOptions) -> None:
@@ -207,9 +207,9 @@ def handle_build(opt: BuildOptions) -> None:
                 logging.fatal(e)
                 sys.exit(1)
 
-        if not opt.skip_repomd:
+        if not opt.skip_refsum:
             commit = repo.last_commit()
-            script = cmdlib.SCRIPTS_ROOT.joinpath("repomd")
+            script = cmdlib.SCRIPTS_ROOT.joinpath("refsumrefsum")
             cmdlib.runcmd(f"sudo -E {script} "
                           f"{opt.stream.like_ostree_ref()} "
                           f"{commit} -w")
@@ -232,7 +232,7 @@ def main() -> None:
     parser.add_argument("--skip-archive",
                         action="store_true",
                         help="If true, skips the OSTree-archiving.")
-    parser.add_argument("--skip-repomd",
+    parser.add_argument("--skip-refsumrefsum",
                         action="store_true",
                         help="If true, skips the metadata collection.")
     args = parser.parse_args()
@@ -250,7 +250,7 @@ def main() -> None:
                                  args.skip_commit,
                                  args.skip_forward,
                                  args.skip_archive,
-                                 args.skip_repomd))
+                                 args.skip_refsum))
     [handle_build(opt) for opt in opts]
 
 

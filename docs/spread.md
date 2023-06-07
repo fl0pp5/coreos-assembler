@@ -2,17 +2,17 @@
 
 Для распространения образов/обновлений и информации о ветках используются скрипты
 * `v1_graph.py` - сервер обновлений
-* `repomd` - сборщих метаифнормации о ветке
-* `reposum` - сборщих информации о доступных образах
+* `refsum` - сборщих метаифнормации о ветке
+* `buildsum` - сборщих информации о доступных образах
 
 
 # Пример
 
-#### repomd
+#### refsum
 
 * Вывод информации в консоль
 ```shell
-./repomd \
+./refsum \
     altcos/x86_64/sisyphus \
     96a1670bc0902c1e679e8f59ccf05fe49b90a9af65a2e9a4eb59aadb71706f2a \
     --indent 4
@@ -20,7 +20,7 @@
 * Запись данных в директорию коммита
 ```shell
 # Нужен запуск от root'а
-sudo -E ./repomd \
+sudo -E ./refsum \
     altcos/x86_64/sisyphus \
     96a1670bc0902c1e679e8f59ccf05fe49b90a9af65a2e9a4eb59aadb71706f2a \
     --indent 4 \
@@ -28,9 +28,9 @@ sudo -E ./repomd \
 ```
 В директории коммита появится файл `metadata.json`.
 
-#### reposum
+#### buildsum
 ```shell
-./reposum sisyphus > "$STREAMS_ROOT"/sisyphus.json
+./buildsum sisyphus > "$STREAMS_ROOT"/sisyphus.json
 ```
 
 
