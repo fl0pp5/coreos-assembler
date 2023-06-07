@@ -255,6 +255,9 @@ class Version:
         [branch, substream] = Branch(prefix[0]), prefix[1]
         [date, major, minor] = parts[1], *map(int, parts[2:])
 
+        if substream == "base":
+            substream = None
+
         return Version(major, minor, branch, substream, date)
 
 
