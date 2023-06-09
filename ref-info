@@ -4,9 +4,9 @@ import argparse
 import logging
 import sys
 
+from altcos import ostree
 from gi.repository import GLib
 
-import altcos
 import cmdlib
 
 SR = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
@@ -28,7 +28,7 @@ class CommitParserHandler(BaseParserHandler):
     @staticmethod
     def handle(args: argparse.Namespace) -> None:
         stream = cmdlib.stream_from_ref(SR, args.ref)
-        repository = cmdlib.wrap_err(altcos.Repository(stream, altcos.Repository.Mode(args.mode)).open,
+        repository = cmdlib.wrap_err(ostree.Repository(stream, ostree.Repository.Mode(args.mode)).open,
                                      f"Repository directory \"{stream.ostree_bare_dir}\" not exists.",
                                      GLib.Error)
 
@@ -46,11 +46,11 @@ class VersionParserHandler(BaseParserHandler):
     @staticmethod
     def handle(args: argparse.Namespace) -> None:
         stream = cmdlib.stream_from_ref(SR, args.ref)
-        repository = cmdlib.wrap_err(altcos.Repository(stream, altcos.Repository.Mode(args.mode)).open,
+        repository = cmdlib.wrap_err(ostree.Repository(stream, ostree.Repository.Mode(args.mode)).open,
                                      f"Repository directory \"{stream.ostree_bare_dir}\" not exists.",
                                      GLib.Error)
         if args.commit:
-            version = cmdlib.wrap_err(altcos.Commit(repository, args.commit).version,
+            version = cmdlib.wrap_err(ostree.Commit(repository, args.commit).version,
                                       f"Commit with id \"{args.commit}\" not found.",
                                       GLib.Error)
         else:
@@ -59,7 +59,7 @@ class VersionParserHandler(BaseParserHandler):
             except GLib.Error:
                 if args.next:
                     print(VersionParserHandler.view_like(
-                        altcos.Version(0, 0, stream.branch, stream.substream), args.view))
+                        ostree.Version(0, 0, stream.branch, stream.substream), args.view))
                     sys.exit(0)
                 logging.fatal("No one commit not found.")
                 sys.exit(1)
@@ -87,7 +87,7 @@ class VersionParserHandler(BaseParserHandler):
         parser.set_defaults(handle=VersionParserHandler.handle)
 
     @staticmethod
-    def view_like(version: altcos.Version, view: str) -> str:
+    def view_like(version: ostree.Version, view: str) -> str:
         match view:
             case "path":
                 version = str(version.like_path)
@@ -113,8 +113,8 @@ class ReferenceParserHandler(BaseParserHandler):
         parser.add_argument("ref",
                             help="Reference name (e.g. \"altcos/x86_64/p10\")")
         parser.add_argument("-m", "--mode",
-                            choices=[*altcos.Repository.Mode],
-                            default=altcos.Repository.Mode.BARE.value,
+                            choices=[*ostree.Repository.Mode],
+                            default=ostree.Repository.Mode.BARE.value,
                             help="Basic repository mode.")
         parser.add_argument("-b", "--is-base",
                             action="store_true",

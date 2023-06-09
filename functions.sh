@@ -207,7 +207,7 @@ is_base_ref() {
 
 get_platform_dirs() {
     local platform=$1
-    echo "$(python3 -c "from altcos import *; print(*ALLOWED_FORMATS[Platform(\"$platform\")])")"
+    echo "$(python3 -c "from altcos.build import *; print(*ALLOWED_FORMATS[Platform(\"$platform\")])")"
 }
 
 init_platform_dir() {
@@ -239,11 +239,11 @@ sign_file() {
 }
 
 get_allowed_architectures() {
-    echo "$(python3 -c "from altcos import *; print(*Arch)")"
+    echo "$(python3 -c "from altcos.ostree import *; print(*Arch)")"
 }
 
 get_allowed_branches() {
-    echo "$(python3 -c "from altcos import *; print(*Branch)")"
+    echo "$(python3 -c "from altcos.ostree import *; print(*Branch)")"
 }
 
 get_img_stream_prefix() {

@@ -5,7 +5,7 @@ import subprocess
 import sys
 import typing
 
-import altcos
+from altcos import ostree
 
 STREAMS_ROOT_ENV = "STREAMS_ROOT"
 BUILDS_ROOT_ENV = "BUILDS_ROOT"
@@ -19,16 +19,16 @@ def import_env(env: str) -> str:
     return value
 
 
-def stream_from_ref(streams_root: str | os.PathLike, ref: str) -> altcos.Stream:
+def stream_from_ref(streams_root: str | os.PathLike, ref: str) -> ostree.Stream:
     try:
-        return altcos.Stream.from_ostree_ref(streams_root, ref)
+        return ostree.Stream.from_ostree_ref(streams_root, ref)
     except ValueError as e:
         logging.fatal(e)
         sys.exit(1)
 
 
-def stream_to_export(stream: altcos.Stream) -> str:
-    attrs = [attr for attr in dir(altcos.Stream) if isinstance(getattr(altcos.Stream, attr), property)]
+def stream_to_export(stream: ostree.Stream) -> str:
+    attrs = [attr for attr in dir(ostree.Stream) if isinstance(getattr(ostree.Stream, attr), property)]
     exports = [f"export {attr.upper()}={getattr(stream, attr)}" for attr in attrs]
     exports.extend([f"export {attr.upper()}={getattr(stream, attr)}" for attr in stream.__dict__])
     exports.append(f"export STREAM_REF={stream.like_ostree_ref()}")
@@ -115,4 +115,3 @@ def sign_file(filename: str | os.PathLike,
 def archive_file(filename: str | os.PathLike) -> subprocess.CompletedProcess:
     return runcmd(f"sudo -E tar -czf {filename}.tar.gz {filename}",
                   quite=True)
-
