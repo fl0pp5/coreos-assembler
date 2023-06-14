@@ -14,7 +14,7 @@ import altcos
 import cmdlib
 
 STREAMS_ROOT = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
-PROGRAM_NAME = sys.argv[0]
+PROGRAM_NAME = pathlib.Path(sys.argv[0]).name
 
 
 @dataclasses.dataclass
