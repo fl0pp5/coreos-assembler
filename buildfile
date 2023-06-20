@@ -7,16 +7,16 @@ import pathlib
 
 import pydantic
 import yaml
+from altcos import ostree, build
 from gi.repository import GLib
 
-import altcos
 import cmdlib
 
 SR = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
 BR = cmdlib.import_env(cmdlib.BUILDS_ROOT_ENV)
 
 
-def get_build_script(fmt: altcos.Format) -> pathlib.Path:
+def get_build_script(fmt: build.Format) -> pathlib.Path:
     """
     :param fmt:
     :return: Абсолютный путь до скрипта.
@@ -24,10 +24,10 @@ def get_build_script(fmt: altcos.Format) -> pathlib.Path:
     return cmdlib.SCRIPTS_ROOT.joinpath(f"build-{fmt}")
 
 
-def get_path_to_image(stream: altcos.Stream,
-                      version: altcos.Version,
-                      platform: altcos.Platform,
-                      fmt: altcos.Format) -> pathlib.Path:
+def get_path_to_image(stream: ostree.Stream,
+                      version: ostree.Version,
+                      platform: build.Platform,
+                      fmt: build.Format) -> pathlib.Path:
     substream = stream.substream or "base"
 
     prefix = f"{stream.branch}_{substream}" \
@@ -50,26 +50,26 @@ class ImageOptions(pydantic.BaseModel):
 
 
 class Config(pydantic.BaseModel):
-    repo: altcos.Repository.Mode
+    repo: ostree.Repository.Mode
     commit: str = "latest"
-    build: dict[altcos.Platform, dict[altcos.Format, ImageOptions | None]]
+    build: dict[build.Platform, dict[build.Format, ImageOptions | None]]
 
 
 @dataclasses.dataclass
 class BuildOptions:
-    stream: altcos.Stream
+    stream: ostree.Stream
     config: Config
     sign_key: str | os.PathLike
 
 
 def handle_build(opt: BuildOptions) -> None:
-    repo = cmdlib.wrap_err(altcos.Repository(opt.stream, opt.config.repo).open,
+    repo = cmdlib.wrap_err(ostree.Repository(opt.stream, opt.config.repo).open,
                            None, GLib.Error)
 
     if opt.config.commit == "latest":
         commit = cmdlib.wrap_err(repo.last_commit, None, GLib.Error)
     else:
-        commit = cmdlib.wrap_err(altcos.Commit(repo, opt.config.commit).open,
+        commit = cmdlib.wrap_err(ostree.Commit(repo, opt.config.commit).open,
                                  None, GLib.Error)
 
     for platform in opt.config.build:

@@ -4,32 +4,32 @@ import pathlib
 import typing
 
 import pydantic
+from altcos import ostree, build
 
 import cmdlib
-import altcos
 
 SR = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
 BR = cmdlib.import_env(cmdlib.BUILDS_ROOT_ENV)
 
-FormatMapping: typing.TypeAlias = dict[altcos.Format, altcos.Artifact]
-PlatformMapping: typing.TypeAlias = dict[altcos.Platform, FormatMapping]
+FormatMapping: typing.TypeAlias = dict[build.Format, build.Artifact]
+PlatformMapping: typing.TypeAlias = dict[build.Platform, FormatMapping]
 VersionMapping: typing.TypeAlias = dict[str, PlatformMapping]
 StreamMapping: typing.TypeAlias = dict[str, VersionMapping]
 ArchMapping: typing.TypeAlias = dict[str, StreamMapping]
-BranchMapping: typing.TypeAlias = dict[altcos.Branch, ArchMapping]
+BranchMapping: typing.TypeAlias = dict[ostree.Branch, ArchMapping]
 
 
 class Collector:
-    def __init__(self, branch: altcos.Branch) -> None:
+    def __init__(self, branch: ostree.Branch) -> None:
         self.branch = branch
         self.root = pathlib.Path(BR, self.branch.value)
 
     def collect_artifact(self,
-                         arch: altcos.Arch,
+                         arch: ostree.Arch,
                          stream: str,
-                         version: altcos.Version,
-                         platform: altcos.Platform,
-                         fmt: altcos.Format) -> altcos.Artifact:
+                         version: ostree.Version,
+                         platform: build.Platform,
+                         fmt: build.Format) -> build.Artifact:
 
         artifacts = [artifact for artifact in
                      self.root.glob(f"{arch}/{stream}/{version}/{platform}/{fmt}/*")]
@@ -46,42 +46,42 @@ class Collector:
             else:
                 uncompressed = artifact
 
-        return altcos.Artifact(altcos.Disk(location, signature, uncompressed, uncompressed_signature))
+        return build.Artifact(build.Disk(location, signature, uncompressed, uncompressed_signature))
 
     def collect_format(self,
-                       arch: altcos.Arch,
+                       arch: ostree.Arch,
                        stream: str,
-                       version: altcos.Version,
-                       platform: altcos.Platform) -> FormatMapping:
+                       version: ostree.Version,
+                       platform: build.Platform) -> FormatMapping:
 
         formats = {}
         for fmt in self.root.glob(f"{arch}/{stream}/{version}/{platform}/*"):
-            fmt = altcos.Format(fmt.name)
+            fmt = build.Format(fmt.name)
             formats[fmt] = self.collect_artifact(arch, stream, version, platform, fmt)
         return formats
 
     def collect_platform(self,
-                         arch: altcos.Arch,
+                         arch: ostree.Arch,
                          stream: str,
-                         version: altcos.Version) -> PlatformMapping:
+                         version: ostree.Version) -> PlatformMapping:
         platforms = {}
         for platform in self.root.glob(f"{arch}/{stream}/{version}/*"):
-            platform = altcos.Platform(platform.name)
+            platform = build.Platform(platform.name)
             platforms[platform] = self.collect_format(arch, stream, version, platform)
         return platforms
 
     def collect_version(self,
-                        arch: altcos.Arch,
+                        arch: ostree.Arch,
                         stream: str) -> VersionMapping:
         versions = {}
         for version in self.root.glob(f"{arch}/{stream}/*"):
             version_name = f"{self.branch}_{stream}.{version.name}"
             versions[version.name] = self.collect_platform(arch,
                                                            stream,
-                                                           altcos.Version.from_str(version_name))
+                                                           ostree.Version.from_str(version_name))
         return versions
 
-    def collect_stream(self, arch: altcos.Arch) -> StreamMapping:
+    def collect_stream(self, arch: ostree.Arch) -> StreamMapping:
         streams = {}
         for stream in self.root.glob(f"{arch}/*"):
             streams[stream.name] = self.collect_version(arch, stream.name)
@@ -90,7 +90,7 @@ class Collector:
     def collect_arch(self) -> ArchMapping:
         architectures = {}
         for arch in self.root.glob("*"):
-            arch = altcos.Arch(arch.name)
+            arch = ostree.Arch(arch.name)
             architectures[arch.value] = self.collect_stream(arch)
         return architectures
 
@@ -113,11 +113,11 @@ def main() -> None:
     args = parser.parse_args()
 
     builds = {
-        altcos.Branch.SISYPHUS: SisyphusBuilds,
-        altcos.Branch.P10: P10Builds
+        ostree.Branch.SISYPHUS: SisyphusBuilds,
+        ostree.Branch.P10: P10Builds
     }
 
-    branch = altcos.Branch(args.branch)
+    branch = ostree.Branch(args.branch)
     summary = Collector(branch).collect()
     print(builds[branch].parse_obj(summary).json())
 

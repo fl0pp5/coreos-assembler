@@ -5,11 +5,11 @@ import http
 import logging
 import os
 
+from altcos import ostree
 from flask import Flask, request, jsonify, send_from_directory, Response
 from gi.repository import GLib
 
 import cmdlib
-import altcos
 
 app = Flask(__name__)
 
@@ -33,7 +33,7 @@ def send_err(kind: int, value: str, log: bool = True) -> tuple[Response, http.HT
     }), http.HTTPStatus.BAD_REQUEST
 
 
-def get_commits_list(repository: altcos.Repository) -> list[altcos.Commit]:
+def get_commits_list(repository: ostree.Repository) -> list[ostree.Commit]:
     commits = [repository.last_commit(), ]
     while True:
         if (commit := commits[-1].parent()) is None:
@@ -47,25 +47,25 @@ def get_commits_list(repository: altcos.Repository) -> list[altcos.Commit]:
 @app.route("/v1/graph")
 def v1_graph() -> tuple[Response, http.HTTPStatus]:
     try:
-        basearch = altcos.Arch(request.args.get("basearch").lower())
+        basearch = ostree.Arch(request.args.get("basearch").lower())
     except ValueError as e:
         return send_err(Error.BAD_BASEARCH, str(e))
 
     try:
         # Под stream имеется ввиду ветка пакетного репозитория
-        branch = altcos.Branch(request.args.get("stream").lower())
+        branch = ostree.Branch(request.args.get("stream").lower())
     except ValueError as e:
         return send_err(Error.BAD_STREAM, str(e))
 
     try:
-        version = altcos.Version.from_str(request.args.get("os_version"))
+        version = ostree.Version.from_str(request.args.get("os_version"))
     except ValueError as e:
         return send_err(Error.BAD_VERSION, str(e))
 
-    stream = altcos.Stream(SR, altcos.OSName.ALTCOS, basearch, branch, version.substream)
+    stream = ostree.Stream(SR, ostree.OSName.ALTCOS, basearch, branch, version.substream)
 
     try:
-        archive = altcos.Repository(stream).open()
+        archive = ostree.Repository(stream).open()
     except GLib.Error as e:
         return send_err(Error.BAD_REPO, str(e))
 
@@ -75,7 +75,7 @@ def v1_graph() -> tuple[Response, http.HTTPStatus]:
     edges = []
 
     for hashsum, index in commit_list.items():
-        commit = altcos.Commit(archive, hashsum)
+        commit = ostree.Commit(archive, hashsum)
         node = {
             "version": str(commit.version()),
             "metadata": {
@@ -91,7 +91,7 @@ def v1_graph() -> tuple[Response, http.HTTPStatus]:
             edges.append([parent_index, index])
 
     for i in range(len(nodes)):
-        for j in range(i+2, len(nodes)):
+        for j in range(i + 2, len(nodes)):
             edges.append([i, j])
 
     graph = {
@@ -104,10 +104,10 @@ def v1_graph() -> tuple[Response, http.HTTPStatus]:
 
 @app.route("/streams/<branch>/<arch>/ostree/archive/<path:path>")
 def stream_content(branch: str, arch: str, path: str | os.PathLike) -> Response:
-    stream = altcos.Stream(SR,
-                           altcos.OSName.ALTCOS,
-                           altcos.Arch(arch),
-                           altcos.Branch(branch))
+    stream = ostree.Stream(SR,
+                           ostree.OSName.ALTCOS,
+                           ostree.Arch(arch),
+                           ostree.Branch(branch))
 
     return send_from_directory(stream.ostree_archive_dir, path)
 

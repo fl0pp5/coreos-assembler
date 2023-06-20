@@ -2,32 +2,32 @@
 
 import argparse
 
-import altcos
+from altcos import ostree
+
 import cmdlib
 
 SR = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
 
 
 def main() -> None:
-
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--osname",
-                        choices=[*altcos.OSName],
-                        default=altcos.OSName.ALTCOS.value)
+                        choices=[*ostree.OSName],
+                        default=ostree.OSName.ALTCOS.value)
     parser.add_argument("-a", "--arch",
-                        choices=[*altcos.Arch],
+                        choices=[*ostree.Arch],
                         required=True)
     parser.add_argument("-b", "--branch",
-                        choices=[*altcos.Branch],
+                        choices=[*ostree.Branch],
                         required=True)
     parser.add_argument("-s", "--substream")
 
     args = parser.parse_args()
 
-    stream = altcos.Stream(SR,
-                           altcos.OSName(args.osname),
-                           altcos.Arch(args.arch),
-                           altcos.Branch(args.branch),
+    stream = ostree.Stream(SR,
+                           ostree.OSName(args.osname),
+                           ostree.Arch(args.arch),
+                           ostree.Branch(args.branch),
                            args.substream)
 
     print(cmdlib.stream_to_export(stream))

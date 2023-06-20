@@ -13,10 +13,11 @@ import typing
 
 import pydantic
 import yaml
+from altcos import ostree
 from gi.repository import GLib
 
 import cmdlib
-import altcos
+import common
 
 SR = cmdlib.import_env(cmdlib.STREAMS_ROOT_ENV)
 
@@ -25,7 +26,7 @@ Package: typing.TypeAlias = str
 
 class Action(abc.ABC):
     @abc.abstractmethod
-    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+    def exec(self, stream: ostree.Stream, env: dict[str, str]) -> dict[str, str]:
         pass
 
 
@@ -38,7 +39,7 @@ class Apt(pydantic.BaseModel, Action):
 
     apt: Apt._Body
 
-    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+    def exec(self, stream: ostree.Stream, env: dict[str, str]) -> dict[str, str]:
         cmd = str(cmdlib.SCRIPTS_ROOT.joinpath(f"apt-ref {stream.like_ostree_ref()}"))
         if self.apt.update:
             cmdlib.runcmd(f"{cmd} update")
@@ -61,7 +62,7 @@ class Env(pydantic.BaseModel, Action):
 
     env: dict[str, str | Env._Cmd]
 
-    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+    def exec(self, stream: ostree.Stream, env: dict[str, str]) -> dict[str, str]:
         for k, v in self.env.items():
             cmd = cmdlib.make_export_env_cmd(env)
             if isinstance(v, Env._Cmd):
@@ -81,7 +82,7 @@ class Podman(pydantic.BaseModel, Action):
 
     podman: Podman._Body
 
-    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+    def exec(self, stream: ostree.Stream, env: dict[str, str]) -> dict[str, str]:
         images = self.podman.images
         env_list_images = self.podman.env_list_images
 
@@ -101,7 +102,7 @@ class Podman(pydantic.BaseModel, Action):
 class Butane(pydantic.BaseModel, Action):
     butane: dict
 
-    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+    def exec(self, stream: ostree.Stream, env: dict[str, str]) -> dict[str, str]:
         butane_yml = yaml.safe_dump(self.butane)
 
         script = cmdlib.SCRIPTS_ROOT.joinpath("apply-ignition")
@@ -113,13 +114,13 @@ class Butane(pydantic.BaseModel, Action):
 class Run(pydantic.BaseModel, Action):
     run: list[str]
 
-    def exec(self, stream: altcos.Stream, env: dict[str, str]) -> dict[str, str]:
+    def exec(self, stream: ostree.Stream, env: dict[str, str]) -> dict[str, str]:
         cmd = f"sudo chroot {stream.merged_dir} bash -c \"{''.join(self.run)}\""
         cmdlib.runcmd(f"{cmdlib.make_export_env_cmd(env)}{cmd}")
         return env
 
 
-class VersionPart(altcos.StrEnum):
+class VersionPart(common.StrEnum):
     MAJOR = "major"
     MINOR = "minor"
 
@@ -134,7 +135,7 @@ class Config(pydantic.BaseModel):
 
 @dataclasses.dataclass
 class BuildOptions:
-    stream: altcos.Stream
+    stream: ostree.Stream
     body: Config
     skip_checkout: bool
     skip_commit: bool
@@ -184,7 +185,7 @@ def handle_build(opt: BuildOptions) -> None:
 
     if not opt.skip_commit:
         try:
-            repo = altcos.Repository(src_stream).open()
+            repo = ostree.Repository(src_stream).open()
             commit = repo.last_commit()
             script = cmdlib.SCRIPTS_ROOT.joinpath("make-commit")
             cmdlib.runcmd(f"{script} "
@@ -242,7 +243,7 @@ def main() -> None:
 
     opts = []
     for ref in content:
-        stream = altcos.Stream.from_ostree_ref(SR, ref)
+        stream = ostree.Stream.from_ostree_ref(SR, ref)
         body = Config.parse_obj(content[stream.like_ostree_ref()])
         opts.append(BuildOptions(stream,
                                  body,
