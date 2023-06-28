@@ -30,7 +30,7 @@ fi
 
 export_stream "$BRANCH" "$ARCH"
 
-rootfs_archive="$ROOTFS_DIR"/acos-latest-"$ARCH".tar
+rootfs_archive="$ROOTFS_DIR"/altcos-latest-"$ARCH".tar
 
 if [ ! -e "$rootfs_archive" ]
 then

@@ -67,4 +67,4 @@ make \
     BRANCH="$BRANCH" \
     ARCH="$ARCH" \
     IMAGEDIR="$ROOTFS_DIR" \
-    vm/acos.tar
+    vm/altcos.tar
